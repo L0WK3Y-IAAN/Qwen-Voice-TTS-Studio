@@ -28,6 +28,9 @@ if [[ "$(printf '%s' "$LAN" | tr '[:lower:]' '[:upper:]')" == "Y" ]]; then
   if [[ -z "${LOCAL_IP}" ]]; then
     LOCAL_IP="$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") {print $(i+1); exit}}')"
   fi
+  if [[ -z "${LOCAL_IP}" ]]; then
+    LOCAL_IP="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)"
+  fi
   if [[ -n "${LOCAL_IP}" ]]; then
     echo -e "LAN address (use this on your phone/PC): \e[35mhttp://${LOCAL_IP}:7860\e[0m"
   fi
@@ -43,7 +46,15 @@ fi
 
 echo
 echo "Launch command:"
-echo "python $SCRIPT_DIR/qwen_voice_gui.py ${ARGS[*]}"
+if [ ${#ARGS[@]} -gt 0 ]; then
+  echo "python $SCRIPT_DIR/qwen_voice_gui.py ${ARGS[*]}"
+else
+  echo "python $SCRIPT_DIR/qwen_voice_gui.py"
+fi
 echo
 
-python "$SCRIPT_DIR/qwen_voice_gui.py" "${ARGS[@]}"
+if [ ${#ARGS[@]} -gt 0 ]; then
+  python "$SCRIPT_DIR/qwen_voice_gui.py" "${ARGS[@]}"
+else
+  python "$SCRIPT_DIR/qwen_voice_gui.py"
+fi
