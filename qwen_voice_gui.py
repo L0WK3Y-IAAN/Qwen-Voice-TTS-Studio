@@ -1987,6 +1987,18 @@ class QwenVoiceGUI:
         
         return app
 
+def _find_free_port(preferred, host, tries=20):
+    port = preferred
+    for _ in range(tries):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.bind((host, port))
+                return port
+            except OSError:
+                port += 1
+    return preferred
+
 def main():
     parser = argparse.ArgumentParser(add_help=True)
     parser.add_argument("--listen", nargs="?", const="0.0.0.0", default=None)
@@ -1994,7 +2006,11 @@ def main():
     args = parser.parse_args()
 
     server_name = "127.0.0.1" if args.listen is None else args.listen
-    server_port = 7860 if args.port is None else args.port
+    if args.port is not None:
+        server_port = args.port
+    else:
+        bind_host = "0.0.0.0" if server_name == "0.0.0.0" else server_name
+        server_port = _find_free_port(7860, bind_host)
 
     def _get_local_ip() -> str:
         try:
