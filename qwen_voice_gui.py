@@ -14,6 +14,12 @@ import subprocess
 from transformers.utils.import_utils import is_flash_attn_2_available
 import socket
 
+try:
+    import librosa
+    LIBROSA_AVAILABLE = True
+except ImportError:
+    LIBROSA_AVAILABLE = False
+
 os.environ['HF_HOME'] = str(Path(__file__).parent / "models")
 
 class QwenVoiceGUI:
@@ -727,7 +733,23 @@ class QwenVoiceGUI:
             return self.custom_model.get_supported_languages()
         return ["Auto", "Chinese", "English", "Japanese", "Korean", "German", "French", "Russian", "Portuguese", "Spanish", "Italian"]
     
-    def generate_tts(self, text, language, speaker, instruct, save_name=None, progress=gr.Progress()):
+    def _generation_kwargs(self, expressiveness=None):
+        """Map the Expressiveness slider onto the model's sampling temperature (model default: 0.9)."""
+        if expressiveness is None:
+            return {}
+        return {"temperature": float(expressiveness)}
+
+    def _apply_pace(self, wavs, sr, pace=None):
+        """Post-process synthesized audio with a time-stretch (Qwen3-TTS has no native pacing control)."""
+        if not pace or abs(float(pace) - 1.0) < 1e-3 or not LIBROSA_AVAILABLE:
+            return wavs
+        stretched = []
+        for w in wavs:
+            y = np.asarray(w, dtype=np.float32)
+            stretched.append(librosa.effects.time_stretch(y, rate=float(pace)))
+        return stretched
+
+    def generate_tts(self, text, language, speaker, instruct, expressiveness=0.9, pace=1.0, save_name=None, progress=gr.Progress()):
         try:
             if not text.strip():
                 return None, "Please enter text to synthesize"
@@ -753,6 +775,7 @@ class QwenVoiceGUI:
                         language=language if language != "Auto" else None,
                         speaker=voice_info.get("speaker", speaker),
                         instruct=instruct if instruct.strip() else None,
+                        **self._generation_kwargs(expressiveness),
                     )
                 else:
                     # Use VoiceDesign model for designed personas
@@ -771,6 +794,7 @@ class QwenVoiceGUI:
                         text=text,
                         language=language if language != "Auto" else None,
                         instruct=combined_instruct,
+                        **self._generation_kwargs(expressiveness),
                     )
             elif speaker in self.cloned_voices:
                 # Cloned voice - use Base model
@@ -793,6 +817,7 @@ class QwenVoiceGUI:
                     language=language if language != "Auto" else None,
                     voice_clone_prompt=prompt_items,
                     instruct=instruct if instruct.strip() else None,
+                    **self._generation_kwargs(expressiveness),
                 )
             elif speaker in self.designed_voices:
                 # Designed voice - use VoiceDesign model
@@ -807,10 +832,13 @@ class QwenVoiceGUI:
                     text=text,
                     language=language if language != "Auto" else None,
                     instruct=voice_data.get("instruct", ""),
+                    **self._generation_kwargs(expressiveness),
                 )
             else:
                 return None, f"✗ Voice not found: {speaker}"
-            
+
+            wavs = self._apply_pace(wavs, sr, pace)
+
             progress(0.8, desc="Saving audio...")
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = self.make_output_filename(save_name or speaker, timestamp, "wav")
@@ -834,7 +862,7 @@ class QwenVoiceGUI:
         except Exception as e:
             return None, f"✗ Error: {str(e)}"
     
-    def clone_voice(self, audio_file, ref_text, target_text, language, voice_name, save_name=None, progress=gr.Progress()):
+    def clone_voice(self, audio_file, ref_text, target_text, language, voice_name, expressiveness=0.9, pace=1.0, save_name=None, progress=gr.Progress()):
         try:
             if audio_file is None:
                 return None, "Please upload a reference audio file", gr.update()
@@ -870,12 +898,14 @@ class QwenVoiceGUI:
                 ref_audio=audio_path,
                 ref_text=ref_text if ref_text.strip() else None,
                 x_vector_only_mode=not ref_text.strip(),
+                **self._generation_kwargs(expressiveness),
             )
-            
+            wavs = self._apply_pace(wavs, sr, pace)
+
             progress(0.8, desc="Saving audio...")
             filename = self.make_output_filename(save_name or voice_name or "clone", timestamp, "wav")
             filepath = self.output_dir / filename
-            
+
             sf.write(str(filepath), wavs[0], sr)
             
             self.audio_history.append({
@@ -911,7 +941,7 @@ class QwenVoiceGUI:
         except Exception as e:
             return None, f"✗ Error: {str(e)}", gr.update()
     
-    def generate_with_cloned_voice(self, voice_name, text, language, save_name=None, progress=gr.Progress()):
+    def generate_with_cloned_voice(self, voice_name, text, language, expressiveness=0.9, pace=1.0, save_name=None, progress=gr.Progress()):
         try:
             if not voice_name:
                 return None, "Please select a cloned voice"
@@ -942,15 +972,17 @@ class QwenVoiceGUI:
                 text=text,
                 language=language if language != "Auto" else None,
                 voice_clone_prompt=prompt_items,
+                **self._generation_kwargs(expressiveness),
             )
-            
+            wavs = self._apply_pace(wavs, sr, pace)
+
             progress(0.8, desc="Saving audio...")
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = self.make_output_filename(save_name or voice_name, timestamp, "wav")
             filepath = self.output_dir / filename
-            
+
             sf.write(str(filepath), wavs[0], sr)
-            
+
             self.audio_history.append({
                 "filename": filename,
                 "filepath": str(filepath),
@@ -966,7 +998,7 @@ class QwenVoiceGUI:
         except Exception as e:
             return None, f"✗ Error: {str(e)}"
     
-    def design_voice(self, text, language, instruct, voice_name, save_name=None, progress=gr.Progress()):
+    def design_voice(self, text, language, instruct, voice_name, expressiveness=0.9, pace=1.0, save_name=None, progress=gr.Progress()):
         try:
             if not text.strip():
                 return None, "Please enter text to synthesize", gr.update()
@@ -984,13 +1016,15 @@ class QwenVoiceGUI:
                 text=text,
                 language=language if language != "Auto" else None,
                 instruct=instruct,
+                **self._generation_kwargs(expressiveness),
             )
-            
+            wavs = self._apply_pace(wavs, sr, pace)
+
             progress(0.8, desc="Saving audio...")
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = self.make_output_filename(save_name or voice_name or "design", timestamp, "wav")
             filepath = self.output_dir / filename
-            
+
             sf.write(str(filepath), wavs[0], sr)
             
             self.audio_history.append({
@@ -1326,6 +1360,18 @@ class QwenVoiceGUI:
                                 lines=2
                             )
 
+                            with gr.Accordion("TTS Parameters", open=False):
+                                tts_expressiveness = gr.Slider(
+                                    label="Expressiveness",
+                                    info="Sampling temperature. Neutral = 0.9, lower = flatter/more consistent, higher = more varied/dynamic (can get unstable above ~1.3).",
+                                    minimum=0.1, maximum=1.5, value=0.9, step=0.05
+                                )
+                                tts_pace = gr.Slider(
+                                    label="Pace",
+                                    info="Post-processing playback speed (time-stretch). 1.0 = normal speed.",
+                                    minimum=0.5, maximum=2.0, value=1.0, step=0.05
+                                )
+
                             tts_save_name = gr.Textbox(
                                 label="Save name (Optional)",
                                 placeholder="If set: used as filename prefix (timestamp will be appended)",
@@ -1358,7 +1404,7 @@ class QwenVoiceGUI:
 
                     tts_generate_btn.click(
                         fn=self.generate_tts,
-                        inputs=[tts_text, tts_language, tts_speaker, tts_instruct, tts_save_name],
+                        inputs=[tts_text, tts_language, tts_speaker, tts_instruct, tts_expressiveness, tts_pace, tts_save_name],
                         outputs=[tts_audio_output, tts_status]
                     )
 
@@ -1401,6 +1447,17 @@ class QwenVoiceGUI:
                                 value="Auto",
                                 allow_custom_value=True
                             )
+                            with gr.Accordion("TTS Parameters", open=False):
+                                clone_expressiveness = gr.Slider(
+                                    label="Expressiveness",
+                                    info="Sampling temperature. Neutral = 0.9, lower = flatter/more consistent, higher = more varied/dynamic (can get unstable above ~1.3).",
+                                    minimum=0.1, maximum=1.5, value=0.9, step=0.05
+                                )
+                                clone_pace = gr.Slider(
+                                    label="Pace",
+                                    info="Post-processing playback speed (time-stretch). 1.0 = normal speed.",
+                                    minimum=0.5, maximum=2.0, value=1.0, step=0.05
+                                )
                             clone_save_name = gr.Textbox(
                                 label="Save name (Optional)",
                                 placeholder="If set: used as output filename prefix (timestamp will be appended)",
@@ -1442,6 +1499,18 @@ class QwenVoiceGUI:
                                 allow_custom_value=True
                             )
 
+                            with gr.Accordion("TTS Parameters", open=False):
+                                saved_voice_expressiveness = gr.Slider(
+                                    label="Expressiveness",
+                                    info="Sampling temperature. Neutral = 0.9, lower = flatter/more consistent, higher = more varied/dynamic (can get unstable above ~1.3).",
+                                    minimum=0.1, maximum=1.5, value=0.9, step=0.05
+                                )
+                                saved_voice_pace = gr.Slider(
+                                    label="Pace",
+                                    info="Post-processing playback speed (time-stretch). 1.0 = normal speed.",
+                                    minimum=0.5, maximum=2.0, value=1.0, step=0.05
+                                )
+
                             saved_voice_save_name = gr.Textbox(
                                 label="Save name (Optional)",
                                 placeholder="If set: used as output filename prefix (timestamp will be appended)",
@@ -1459,7 +1528,7 @@ class QwenVoiceGUI:
                     
                     clone_generate_btn.click(
                         fn=self.clone_voice,
-                        inputs=[clone_audio, clone_ref_text, clone_target_text, clone_language, clone_voice_name, clone_save_name],
+                        inputs=[clone_audio, clone_ref_text, clone_target_text, clone_language, clone_voice_name, clone_expressiveness, clone_pace, clone_save_name],
                         outputs=[clone_audio_output, clone_status, saved_voice_dropdown]
                     )
 
@@ -1489,7 +1558,7 @@ class QwenVoiceGUI:
                     
                     saved_voice_generate_btn.click(
                         fn=self.generate_with_cloned_voice,
-                        inputs=[saved_voice_dropdown, saved_voice_text, saved_voice_language, saved_voice_save_name],
+                        inputs=[saved_voice_dropdown, saved_voice_text, saved_voice_language, saved_voice_expressiveness, saved_voice_pace, saved_voice_save_name],
                         outputs=[saved_voice_audio_output, saved_voice_status]
                     )
 
@@ -1537,6 +1606,18 @@ class QwenVoiceGUI:
                                 placeholder="Enter a name to save this designed voice for reuse"
                             )
 
+                            with gr.Accordion("TTS Parameters", open=False):
+                                design_expressiveness = gr.Slider(
+                                    label="Expressiveness",
+                                    info="Sampling temperature. Neutral = 0.9, lower = flatter/more consistent, higher = more varied/dynamic (can get unstable above ~1.3).",
+                                    minimum=0.1, maximum=1.5, value=0.9, step=0.05
+                                )
+                                design_pace = gr.Slider(
+                                    label="Pace",
+                                    info="Post-processing playback speed (time-stretch). 1.0 = normal speed.",
+                                    minimum=0.5, maximum=2.0, value=1.0, step=0.05
+                                )
+
                             design_save_name = gr.Textbox(
                                 label="Save name (Optional)",
                                 placeholder="If set: used as output filename prefix (timestamp will be appended)",
@@ -1583,7 +1664,7 @@ class QwenVoiceGUI:
                     
                     design_generate_btn.click(
                         fn=self.design_voice,
-                        inputs=[design_text, design_language, design_instruct, design_voice_name, design_save_name],
+                        inputs=[design_text, design_language, design_instruct, design_voice_name, design_expressiveness, design_pace, design_save_name],
                         outputs=[design_audio_output, design_status, designed_voice_dropdown]
                     )
 
