@@ -23,7 +23,7 @@ python -c "import torch; print('Torch:', torch.__version__); print('CUDA Availab
 echo
 read -r -p "Use Qwen Voice TTS Studio on other devices in your network (y/N)?: " LAN
 LAN="${LAN:-N}"
-if [[ "${LAN^^}" == "Y" ]]; then
+if [[ "$(printf '%s' "$LAN" | tr '[:lower:]' '[:upper:]')" == "Y" ]]; then
   LOCAL_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
   if [[ -z "${LOCAL_IP}" ]]; then
     LOCAL_IP="$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") {print $(i+1); exit}}')"

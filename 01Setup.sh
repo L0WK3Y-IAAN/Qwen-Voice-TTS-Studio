@@ -25,7 +25,7 @@ VENV_PATH="$SCRIPT_DIR/venv"
 if [[ -d "$VENV_PATH" ]]; then
   read -r -p "Virtual environment already exists. Reuse (R) or create New (N)? [R/N]: " REUSE
   REUSE="${REUSE:-R}"
-  if [[ "${REUSE^^}" == "N" ]]; then
+  if [[ "$(printf '%s' "$REUSE" | tr '[:lower:]' '[:upper:]')" == "N" ]]; then
     echo "Removing existing virtual environment"
     rm -rf "$VENV_PATH"
     echo "Creating virtual environment"
