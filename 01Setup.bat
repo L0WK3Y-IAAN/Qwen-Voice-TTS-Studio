@@ -7,18 +7,61 @@ echo Qwen Voice TTS Studio 1.1  - Setup Script
 echo ========================================
 echo.
 
-set "PYTHON_PATH=%SCRIPT_DIR%312\python.exe"
+set "PYTHON_DIR=%SCRIPT_DIR%312"
+set "PYTHON_PATH=%PYTHON_DIR%\python.exe"
+set "PYTHON_VERSION=3.12.8"
 set "VENV_PATH=%SCRIPT_DIR%venv"
 
-echo Checking Python installation
+echo Checking local Python runtime
 if not exist "%PYTHON_PATH%" (
-    echo ERROR: Python not found at %PYTHON_PATH%
-    echo Please ensure Python 3.12+ is installed at the specified location.
-    pause
-    exit /b 1
-)
+    echo Local Python runtime not found - downloading Python %PYTHON_VERSION% embeddable package from python.org
+    set "PY_ZIP=%TEMP%\python-%PYTHON_VERSION%-embed-amd64.zip"
+    set "PY_URL=https://www.python.org/ftp/python/%PYTHON_VERSION%/python-%PYTHON_VERSION%-embed-amd64.zip"
 
-echo Python found: %PYTHON_PATH%
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri '%PY_URL%' -OutFile '%PY_ZIP%'"
+    if errorlevel 1 (
+        echo ERROR: Failed to download Python embeddable package from %PY_URL%
+        pause
+        exit /b 1
+    )
+
+    echo Downloaded package checksum (verify against python.org if desired):
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Write-Host ('  SHA256: ' + (Get-FileHash -Algorithm SHA256 -Path '%PY_ZIP%').Hash)"
+
+    echo Extracting to %PYTHON_DIR%
+    if not exist "%PYTHON_DIR%" mkdir "%PYTHON_DIR%"
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Force -Path '%PY_ZIP%' -DestinationPath '%PYTHON_DIR%'"
+    if errorlevel 1 (
+        echo ERROR: Failed to extract Python embeddable package
+        pause
+        exit /b 1
+    )
+    del "%PY_ZIP%" >nul 2>&1
+
+    echo Enabling site-packages for the embedded runtime
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "(Get-Content '%PYTHON_DIR%\python312._pth') -replace '^#import site', 'import site' | Set-Content '%PYTHON_DIR%\python312._pth'"
+
+    echo Bootstrapping pip
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile '%TEMP%\get-pip.py'"
+    "%PYTHON_PATH%" "%TEMP%\get-pip.py" --no-warn-script-location
+    if errorlevel 1 (
+        echo ERROR: Failed to bootstrap pip in the embedded runtime
+        pause
+        exit /b 1
+    )
+    del "%TEMP%\get-pip.py" >nul 2>&1
+
+    echo Installing virtualenv (the embeddable runtime does not support the venv module)
+    "%PYTHON_PATH%" -m pip install virtualenv
+    if errorlevel 1 (
+        echo ERROR: Failed to install virtualenv in the embedded runtime
+        pause
+        exit /b 1
+    )
+    echo Local Python runtime ready.
+) else (
+    echo Local Python runtime found: %PYTHON_PATH%
+)
 echo.
 
 echo Creating virtual environment
@@ -35,7 +78,7 @@ if exist "%VENV_PATH%" (
         )
         echo.
         echo Creating virtual environment
-        "%PYTHON_PATH%" -m venv "%VENV_PATH%"
+        "%PYTHON_PATH%" -m virtualenv "%VENV_PATH%"
         if errorlevel 1 (
             echo ERROR: Failed to create virtual environment
             pause
@@ -46,7 +89,7 @@ if exist "%VENV_PATH%" (
         echo Using existing virtual environment.
     )
 ) else (
-    "%PYTHON_PATH%" -m venv "%VENV_PATH%"
+    "%PYTHON_PATH%" -m virtualenv "%VENV_PATH%"
     if errorlevel 1 (
         echo ERROR: Failed to create virtual environment
         pause

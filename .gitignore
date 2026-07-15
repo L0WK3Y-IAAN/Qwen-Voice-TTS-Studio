@@ -1,0 +1,15 @@
+# Local Python runtime bootstrapped by 01Setup.bat (downloaded, not committed)
+/312/
+
+# Virtual environment
+/venv/
+
+# Model weights and caches
+/models/
+
+# Generated/runtime data
+/outputs/
+/voicesamples/
+/voiceinputs/
+__pycache__/
+*.pyc

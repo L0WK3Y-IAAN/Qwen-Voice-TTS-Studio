@@ -121,7 +121,8 @@ Changing it reloads models on the selected device.
 
 ## Requirements
 
-- Windows: repo includes embedded Python **3.12** under `./312`
+- Windows: `01Setup.bat` automatically downloads the official Python **3.12.8** embeddable package from python.org into `./312` on first run (not committed to the repo)
+- Linux: requires `python3` (3.12+) on your `PATH`
 - Disk space:
   - models are ~10-12GB total
 

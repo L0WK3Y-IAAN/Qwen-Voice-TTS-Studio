@@ -12,13 +12,10 @@ echo
 echo "NOTE: Linux support is not tested. Please provide a PR if something breaks."
 echo
 
-PYTHON_PATH="$SCRIPT_DIR/312/python"
-if [[ -x "$PYTHON_PATH" ]]; then
-  PY="$PYTHON_PATH"
-elif command -v python3 >/dev/null 2>&1; then
+if command -v python3 >/dev/null 2>&1; then
   PY="python3"
 else
-  echo "ERROR: python3 not found and $PYTHON_PATH not available"
+  echo "ERROR: python3 not found. Please install Python 3.12+."
   exit 1
 fi
 
